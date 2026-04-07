@@ -70,7 +70,6 @@ async function enviarEmailAlerta(dispositivo, tipo) {
   console.log(`Email enviado a ${dispositivo.email_cliente}`);
 }
 
-// Ping desde el ESP
 app.get('/ping', async (req, res) => {
   const { id, estado, motivo } = req.query;
   const ahora = new Date().toISOString();
@@ -100,7 +99,53 @@ app.get('/ping', async (req, res) => {
   res.json({ ok: true, id, timestamp: ahora });
 });
 
-// Login del cliente
+app.get('/registrar', async (req, res) => {
+  const { id, email, nombre, password } = req.query;
+
+  if (!id || !email) return res.json({ ok: false, error: 'Faltan datos' });
+
+  console.log(`Registrando dispositivo: ${id} | ${email} | ${nombre}`);
+
+  const { error } = await supabase
+    .from('dispositivos')
+    .upsert({
+      chip_id: id,
+      email_cliente: email,
+      nombre: nombre || 'Mi dispositivo',
+      estado: 'online',
+      ultimo_ping: new Date().toISOString()
+    }, { onConflict: 'chip_id' });
+
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+
+  const { data: clienteExiste } = await supabase
+    .from('clientes')
+    .select('email')
+    .eq('email', email)
+    .single();
+
+  if (!clienteExiste) {
+    await supabase
+      .from('clientes')
+      .insert({
+        email: email,
+        password: password || id.slice(-4),
+        nombre: nombre || 'Cliente'
+      });
+    console.log(`Cliente nuevo: ${email} | contraseña: ${password || id.slice(-4)}`);
+  } else {
+    if (password) {
+      await supabase
+        .from('clientes')
+        .update({ password: password })
+        .eq('email', email);
+      console.log(`Contraseña actualizada: ${email}`);
+    }
+  }
+
+  res.json({ ok: true });
+});
+
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -115,7 +160,6 @@ app.post('/login', async (req, res) => {
   res.json({ ok: true, nombre: data.nombre });
 });
 
-// Dispositivos del cliente
 app.get('/dispositivos', async (req, res) => {
   const { email } = req.query;
   if (!email) return res.json({ dispositivos: [] });
@@ -130,7 +174,6 @@ app.get('/dispositivos', async (req, res) => {
   res.json({ dispositivos: data || [] });
 });
 
-// Alertas del cliente
 app.get('/alertas', async (req, res) => {
   const { email } = req.query;
   if (!email) return res.json({ alertas: [] });
@@ -154,47 +197,7 @@ app.get('/alertas', async (req, res) => {
   if (error) return res.status(500).json({ ok: false });
   res.json({ alertas: data || [] });
 });
-// Registrar dispositivo nuevo desde el portal WiFi
-app.get('/registrar', async (req, res) => {
-  const { id, email, nombre } = req.query;
 
-  if (!id || !email) return res.json({ ok: false, error: 'Faltan datos' });
-
-  console.log(`Registrando dispositivo: ${id} | ${email} | ${nombre}`);
-
-  const { error } = await supabase
-    .from('dispositivos')
-    .upsert({
-      chip_id: id,
-      email_cliente: email,
-      nombre: nombre || 'Mi dispositivo',
-      estado: 'online',
-      ultimo_ping: new Date().toISOString()
-    }, { onConflict: 'chip_id' });
-
-  if (error) return res.status(500).json({ ok: false, error: error.message });
-
-  // Crear cliente si no existe
-  const { data: clienteExiste } = await supabase
-    .from('clientes')
-    .select('email')
-    .eq('email', email)
-    .single();
-
-  if (!clienteExiste) {
-    await supabase
-      .from('clientes')
-      .insert({
-        email: email,
-        password: id.slice(-4),
-        nombre: nombre || 'Cliente'
-      });
-    console.log(`Cliente nuevo creado: ${email} | contraseña: ${id.slice(-4)}`);
-  }
-
-  res.json({ ok: true });
-});
-// Vigilante — se ejecuta cada minuto
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
   const ahora = new Date();
@@ -230,7 +233,6 @@ setInterval(async () => {
   }
 }, 1 * 60 * 1000);
 
-// Test
 app.get('/', (req, res) => {
   res.json({ status: 'AlertaLuz backend funcionando' });
 });
