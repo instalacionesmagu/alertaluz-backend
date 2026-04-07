@@ -70,6 +70,7 @@ async function enviarEmailAlerta(dispositivo, tipo) {
   console.log(`Email enviado a ${dispositivo.email_cliente}`);
 }
 
+// Ping desde el ESP
 app.get('/ping', async (req, res) => {
   const { id, estado, motivo } = req.query;
   const ahora = new Date().toISOString();
@@ -99,6 +100,62 @@ app.get('/ping', async (req, res) => {
   res.json({ ok: true, id, timestamp: ahora });
 });
 
+// Login del cliente
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('*')
+    .eq('email', email)
+    .eq('password', password)
+    .single();
+
+  if (error || !data) return res.json({ ok: false });
+  res.json({ ok: true, nombre: data.nombre });
+});
+
+// Dispositivos del cliente
+app.get('/dispositivos', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.json({ dispositivos: [] });
+
+  const { data, error } = await supabase
+    .from('dispositivos')
+    .select('*')
+    .eq('email_cliente', email)
+    .order('ultimo_ping', { ascending: false });
+
+  if (error) return res.status(500).json({ ok: false });
+  res.json({ dispositivos: data || [] });
+});
+
+// Alertas del cliente
+app.get('/alertas', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.json({ alertas: [] });
+
+  const { data: dispositivos } = await supabase
+    .from('dispositivos')
+    .select('chip_id')
+    .eq('email_cliente', email);
+
+  if (!dispositivos || dispositivos.length === 0) return res.json({ alertas: [] });
+
+  const chipIds = dispositivos.map(d => d.chip_id);
+
+  const { data, error } = await supabase
+    .from('alertas')
+    .select('*')
+    .in('chip_id', chipIds)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) return res.status(500).json({ ok: false });
+  res.json({ alertas: data || [] });
+});
+
+// Vigilante — se ejecuta cada minuto
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
   const ahora = new Date();
@@ -134,6 +191,7 @@ setInterval(async () => {
   }
 }, 1 * 60 * 1000);
 
+// Test
 app.get('/', (req, res) => {
   res.json({ status: 'AlertaLuz backend funcionando' });
 });
