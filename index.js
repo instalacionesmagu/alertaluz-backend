@@ -48,8 +48,8 @@ app.get('/ping', async (req, res) => {
     .eq('chip_id', id)
     .single();
 
-  if (actual && actual.estado === 'offline') {
-    await enviarEmailAlerta({ ...actual, motivo_corte: motivo }, 'online');
+if (actual && actual.estado === 'offline') {
+    await enviarEmailAlerta({ ...actual, motivo_corte: motivo || 'luz' }, 'online');
   }
 
   const { error } = await supabase
@@ -69,7 +69,7 @@ app.get('/ping', async (req, res) => {
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
   const ahora = new Date();
-  const limite = new Date(ahora.getTime() - 3 * 60 * 1000);
+  const limite = new Date(ahora.getTime() - 2 * 60 * 1000);
 
   const { data: dispositivos, error } = await supabase
     .from('dispositivos')
@@ -99,7 +99,7 @@ setInterval(async () => {
 
     console.log(`Dispositivo ${d.chip_id} marcado como OFFLINE`);
   }
-}, 2 * 60 * 1000);
+}, 1 * 60 * 1000);
 
 // Test
 app.get('/', (req, res) => {
