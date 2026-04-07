@@ -182,7 +182,7 @@ setInterval(async () => {
       .insert({
         chip_id: d.chip_id,
         tipo: 'offline',
-        mensaje: `Dispositivo ${d.nombre || d.chip_id} sin señal desde ${d.ultimo_ping}`
+        mensaje: `Dispositivo ${d.nombre || d.chip_id} sin señal desde ${formatearFecha(d.ultimo_ping)}`
       });
 
     await enviarEmailAlerta(d, 'offline');
