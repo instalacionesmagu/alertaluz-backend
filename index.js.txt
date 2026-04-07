@@ -1,0 +1,23 @@
+const express = require('express');
+const cors = require('cors');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json());
+
+// Ping desde el ESP
+app.get('/ping', (req, res) => {
+  const { id, estado, motivo } = req.query;
+  console.log(`Ping recibido - ID: ${id} | Estado: ${estado} | Motivo: ${motivo || 'ninguno'}`);
+  res.json({ ok: true, id, timestamp: new Date().toISOString() });
+});
+
+// Test
+app.get('/', (req, res) => {
+  res.json({ status: 'AlertaLuz backend funcionando' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
