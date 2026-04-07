@@ -12,43 +12,77 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 app.use(cors());
 app.use(express.json());
 
-// Función para enviar email de alerta
+function formatearFecha(isoString) {
+  if (!isoString) return 'desconocida';
+  const fecha = new Date(isoString);
+  return fecha.toLocaleString('es-ES', {
+    timeZone: 'Europe/Madrid',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
 async function enviarEmailAlerta(dispositivo, tipo) {
-  const esOffline = tipo === 'offline';
-  const asunto = esOffline
-    ? `⚠️ Alerta: ${dispositivo.nombre || dispositivo.chip_id} sin señal`
-    : `✅ Restablecido: ${dispositivo.nombre || dispositivo.chip_id} vuelve a estar online`;
-
-  const mensaje = esOffline
-    ? `Tu dispositivo <b>${dispositivo.nombre || dispositivo.chip_id}</b> ha dejado de enviar señal.<br><br>Puede ser un corte de luz o de internet.<br><br>Último ping recibido: ${dispositivo.ultimo_ping}`
-    : `Tu dispositivo <b>${dispositivo.nombre || dispositivo.chip_id}</b> ha vuelto a conectarse.<br><br>Motivo del corte: ${dispositivo.motivo_corte || 'desconocido'}`;
-
   if (!dispositivo.email_cliente) return;
+
+  const esOffline = tipo === 'offline';
+  const nombre = dispositivo.nombre || dispositivo.chip_id;
+  const horaEvento = formatearFecha(dispositivo.ultimo_ping);
+  const horaAhora = formatearFecha(new Date().toISOString());
+
+  const asunto = esOffline
+    ? `⚠️ Alerta: ${nombre} sin señal desde las ${horaEvento}`
+    : `✅ Restablecido: ${nombre} vuelve a estar online`;
+
+  const mensajeHTML = esOffline
+    ? `
+      <h2 style="color:#c0392b">⚠️ Dispositivo sin señal</h2>
+      <p>Tu dispositivo <b>${nombre}</b> ha dejado de enviar señal.</p>
+      <p>Puede ser un corte de luz o de internet.</p>
+      <br>
+      <table style="border-collapse:collapse">
+        <tr><td style="padding:4px 12px 4px 0"><b>Último ping recibido:</b></td><td>${horaEvento}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><b>Alerta generada a las:</b></td><td>${horaAhora}</td></tr>
+      </table>
+    `
+    : `
+      <h2 style="color:#27ae60">✅ Servicio restablecido</h2>
+      <p>Tu dispositivo <b>${nombre}</b> ha vuelto a conectarse.</p>
+      <br>
+      <table style="border-collapse:collapse">
+        <tr><td style="padding:4px 12px 4px 0"><b>Motivo del corte:</b></td><td>${dispositivo.motivo_corte || 'desconocido'}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><b>Última señal antes del corte:</b></td><td>${horaEvento}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><b>Reconexión a las:</b></td><td>${horaAhora}</td></tr>
+      </table>
+    `;
 
   await resend.emails.send({
     from: 'AlertaLuz <onboarding@resend.dev>',
     to: dispositivo.email_cliente,
     subject: asunto,
-    html: `<p>${mensaje}</p>`
+    html: mensajeHTML
   });
 
   console.log(`Email enviado a ${dispositivo.email_cliente}`);
 }
 
-// Ping desde el ESP
 app.get('/ping', async (req, res) => {
   const { id, estado, motivo } = req.query;
   const ahora = new Date().toISOString();
+
   console.log(`Ping recibido - ID: ${id} | Estado: ${estado} | Motivo: ${motivo || 'ninguno'}`);
 
-  // Si vuelve online después de estar offline, enviar email de restablecimiento
   const { data: actual } = await supabase
     .from('dispositivos')
     .select('*')
     .eq('chip_id', id)
     .single();
 
-if (actual && actual.estado === 'offline') {
+  if (actual && actual.estado === 'offline') {
     await enviarEmailAlerta({ ...actual, motivo_corte: motivo || 'luz' }, 'online');
   }
 
@@ -65,7 +99,6 @@ if (actual && actual.estado === 'offline') {
   res.json({ ok: true, id, timestamp: ahora });
 });
 
-// Vigilante — se ejecuta cada 2 minutos
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
   const ahora = new Date();
@@ -101,7 +134,6 @@ setInterval(async () => {
   }
 }, 1 * 60 * 1000);
 
-// Test
 app.get('/', (req, res) => {
   res.json({ status: 'AlertaLuz backend funcionando' });
 });
