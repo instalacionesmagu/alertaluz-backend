@@ -154,7 +154,46 @@ app.get('/alertas', async (req, res) => {
   if (error) return res.status(500).json({ ok: false });
   res.json({ alertas: data || [] });
 });
+// Registrar dispositivo nuevo desde el portal WiFi
+app.get('/registrar', async (req, res) => {
+  const { id, email, nombre } = req.query;
 
+  if (!id || !email) return res.json({ ok: false, error: 'Faltan datos' });
+
+  console.log(`Registrando dispositivo: ${id} | ${email} | ${nombre}`);
+
+  const { error } = await supabase
+    .from('dispositivos')
+    .upsert({
+      chip_id: id,
+      email_cliente: email,
+      nombre: nombre || 'Mi dispositivo',
+      estado: 'online',
+      ultimo_ping: new Date().toISOString()
+    }, { onConflict: 'chip_id' });
+
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+
+  // Crear cliente si no existe
+  const { data: clienteExiste } = await supabase
+    .from('clientes')
+    .select('email')
+    .eq('email', email)
+    .single();
+
+  if (!clienteExiste) {
+    await supabase
+      .from('clientes')
+      .insert({
+        email: email,
+        password: id.slice(-4),
+        nombre: nombre || 'Cliente'
+      });
+    console.log(`Cliente nuevo creado: ${email} | contraseña: ${id.slice(-4)}`);
+  }
+
+  res.json({ ok: true });
+});
 // Vigilante — se ejecuta cada minuto
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
