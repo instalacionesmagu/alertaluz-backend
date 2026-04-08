@@ -26,6 +26,21 @@ function formatearFecha(isoString) {
   });
 }
 
+function formatearFechaSolo(dateString) {
+  if (!dateString) return 'sin fecha';
+  const [y, m, d] = dateString.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function verificarAdmin(req, res) {
+  const clave = req.query.clave || req.body?.clave;
+  if (clave !== process.env.ADMIN_KEY) {
+    res.status(401).json({ ok: false, error: 'No autorizado' });
+    return false;
+  }
+  return true;
+}
+
 async function enviarEmailAlerta(dispositivo, tipo) {
   if (!dispositivo.email_cliente) return;
 
@@ -70,6 +85,35 @@ async function enviarEmailAlerta(dispositivo, tipo) {
   console.log(`Email enviado a ${dispositivo.email_cliente}`);
 }
 
+async function enviarEmailRenovacion(dispositivo, diasRestantes) {
+  if (!dispositivo.email_cliente) return;
+  const nombre = dispositivo.nombre || dispositivo.chip_id;
+  const fechaExp = formatearFechaSolo(dispositivo.fecha_expiracion);
+
+  await resend.emails.send({
+    from: 'AlertaLuz <onboarding@resend.dev>',
+    to: dispositivo.email_cliente,
+    subject: `⏰ Tu servicio AlertaLuz caduca en ${diasRestantes} días`,
+    html: `
+      <h2 style="color:#e67e22">⏰ Renovación de servicio AlertaLuz</h2>
+      <p>Hola, te informamos que el servicio de monitoreo para tu dispositivo <b>${nombre}</b> caduca el <b>${fechaExp}</b>.</p>
+      <p>Quedan <b>${diasRestantes} días</b> para que el servicio deje de funcionar.</p>
+      <br>
+      <p>Para renovar el servicio por otro año, contacta con nosotros:</p>
+      <br>
+      <table style="border-collapse:collapse">
+        <tr><td style="padding:4px 12px 4px 0"><b>Empresa:</b></td><td>MaGu Multiservicios</td></tr>
+        <tr><td style="padding:4px 12px 4px 0"><b>Email:</b></td><td>instalacionesmagu@gmail.com</td></tr>
+      </table>
+      <br>
+      <p style="color:#888;font-size:12px">Si ya has realizado el pago, ignora este mensaje.</p>
+    `
+  });
+
+  console.log(`Email renovación enviado a ${dispositivo.email_cliente} (${diasRestantes} días)`);
+}
+
+// Ping desde el ESP
 app.get('/ping', async (req, res) => {
   const { id, estado, motivo } = req.query;
   const ahora = new Date().toISOString();
@@ -82,8 +126,20 @@ app.get('/ping', async (req, res) => {
     .eq('chip_id', id)
     .single();
 
-  if (actual && actual.estado === 'offline') {
-    await enviarEmailAlerta({ ...actual, motivo_corte: motivo || 'luz' }, 'online');
+  // Comprobar si está activo y no ha caducado
+  if (actual) {
+    if (actual.activo === false) {
+      return res.json({ ok: false, mensaje: 'Dispositivo desactivado' });
+    }
+    if (actual.fecha_expiracion) {
+      const hoy = new Date().toISOString().split('T')[0];
+      if (actual.fecha_expiracion < hoy) {
+        return res.json({ ok: false, mensaje: 'Servicio caducado. Contacta con MaGu Multiservicios.' });
+      }
+    }
+    if (actual.estado === 'offline') {
+      await enviarEmailAlerta({ ...actual, motivo_corte: motivo || 'luz' }, 'online');
+    }
   }
 
   const { error } = await supabase
@@ -99,12 +155,16 @@ app.get('/ping', async (req, res) => {
   res.json({ ok: true, id, timestamp: ahora });
 });
 
+// Registrar dispositivo
 app.get('/registrar', async (req, res) => {
   const { id, email, nombre, password } = req.query;
-
   if (!id || !email) return res.json({ ok: false, error: 'Faltan datos' });
 
   console.log(`Registrando dispositivo: ${id} | ${email} | ${nombre}`);
+
+  // Fecha de expiración = 1 año desde hoy
+  const hoy = new Date();
+  const expiracion = new Date(hoy.setFullYear(hoy.getFullYear() + 1)).toISOString().split('T')[0];
 
   const { error } = await supabase
     .from('dispositivos')
@@ -113,6 +173,8 @@ app.get('/registrar', async (req, res) => {
       email_cliente: email,
       nombre: nombre || 'Mi dispositivo',
       estado: 'online',
+      activo: true,
+      fecha_expiracion: expiracion,
       ultimo_ping: new Date().toISOString()
     }, { onConflict: 'chip_id' });
 
@@ -130,25 +192,25 @@ app.get('/registrar', async (req, res) => {
       .insert({
         email: email,
         password: password || id.slice(-4),
-        nombre: nombre || 'Cliente'
+        nombre: nombre || 'Cliente',
+        fecha_expiracion: expiracion
       });
-    console.log(`Cliente nuevo: ${email} | contraseña: ${password || id.slice(-4)}`);
+    console.log(`Cliente nuevo: ${email} | expira: ${expiracion}`);
   } else {
     if (password) {
       await supabase
         .from('clientes')
         .update({ password: password })
         .eq('email', email);
-      console.log(`Contraseña actualizada: ${email}`);
     }
   }
 
-  res.json({ ok: true });
+  res.json({ ok: true, expiracion });
 });
 
+// Login
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
-
   const { data, error } = await supabase
     .from('clientes')
     .select('*')
@@ -160,6 +222,7 @@ app.post('/login', async (req, res) => {
   res.json({ ok: true, nombre: data.nombre });
 });
 
+// Dispositivos del cliente
 app.get('/dispositivos', async (req, res) => {
   const { email } = req.query;
   if (!email) return res.json({ dispositivos: [] });
@@ -174,6 +237,7 @@ app.get('/dispositivos', async (req, res) => {
   res.json({ dispositivos: data || [] });
 });
 
+// Alertas del cliente
 app.get('/alertas', async (req, res) => {
   const { email } = req.query;
   if (!email) return res.json({ alertas: [] });
@@ -198,10 +262,9 @@ app.get('/alertas', async (req, res) => {
   res.json({ alertas: data || [] });
 });
 
-// Panel admin — solo con clave secreta
+// ADMIN — ver dispositivos
 app.get('/admin/dispositivos', async (req, res) => {
-  const { clave } = req.query;
-  if (clave !== process.env.ADMIN_KEY) return res.status(401).json({ ok: false, error: 'No autorizado' });
+  if (!verificarAdmin(req, res)) return;
 
   const { data, error } = await supabase
     .from('dispositivos')
@@ -213,9 +276,9 @@ app.get('/admin/dispositivos', async (req, res) => {
   res.json({ dispositivos: data || [] });
 });
 
+// ADMIN — ver clientes
 app.get('/admin/clientes', async (req, res) => {
-  const { clave } = req.query;
-  if (clave !== process.env.ADMIN_KEY) return res.status(401).json({ ok: false, error: 'No autorizado' });
+  if (!verificarAdmin(req, res)) return;
 
   const { data, error } = await supabase
     .from('clientes')
@@ -226,39 +289,117 @@ app.get('/admin/clientes', async (req, res) => {
   res.json({ clientes: data || [] });
 });
 
+// ADMIN — activar/desactivar dispositivo
+app.post('/admin/dispositivo/activar', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_id, activo } = req.body;
+
+  const { error } = await supabase
+    .from('dispositivos')
+    .update({ activo: activo })
+    .eq('chip_id', chip_id);
+
+  if (error) return res.status(500).json({ ok: false });
+  console.log(`Dispositivo ${chip_id} ${activo ? 'activado' : 'desactivado'}`);
+  res.json({ ok: true });
+});
+
+// ADMIN — cambiar fecha de expiración
+app.post('/admin/dispositivo/renovar', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_id, fecha_expiracion } = req.body;
+
+  const { error } = await supabase
+    .from('dispositivos')
+    .update({ activo: true, fecha_expiracion: fecha_expiracion })
+    .eq('chip_id', chip_id);
+
+  if (error) return res.status(500).json({ ok: false });
+  console.log(`Dispositivo ${chip_id} renovado hasta ${fecha_expiracion}`);
+  res.json({ ok: true });
+});
+
+// ADMIN — eliminar dispositivo
+app.delete('/admin/dispositivo/:chip_id', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_id } = req.params;
+
+  await supabase.from('alertas').delete().eq('chip_id', chip_id);
+  const { error } = await supabase.from('dispositivos').delete().eq('chip_id', chip_id);
+
+  if (error) return res.status(500).json({ ok: false });
+  console.log(`Dispositivo ${chip_id} eliminado`);
+  res.json({ ok: true });
+});
+
+// ADMIN — eliminar cliente
+app.delete('/admin/cliente/:email', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { email } = req.params;
+
+  const { error } = await supabase.from('clientes').delete().eq('email', email);
+
+  if (error) return res.status(500).json({ ok: false });
+  console.log(`Cliente ${email} eliminado`);
+  res.json({ ok: true });
+});
+
+// Vigilante — comprueba pings y fechas de expiración
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
   const ahora = new Date();
   const limite = new Date(ahora.getTime() - 2 * 60 * 1000);
+  const hoy = ahora.toISOString().split('T')[0];
 
+  // Detectar offline
   const { data: dispositivos, error } = await supabase
     .from('dispositivos')
     .select('*')
     .eq('estado', 'online')
+    .eq('activo', true)
     .lt('ultimo_ping', limite.toISOString());
 
-  if (error) return console.error('Error vigilante:', error.message);
-
-  for (const d of dispositivos) {
-    console.log(`ALERTA: ${d.chip_id} sin ping desde ${d.ultimo_ping}`);
-
-    await supabase
-      .from('dispositivos')
-      .update({ estado: 'offline' })
-      .eq('chip_id', d.chip_id);
-
-    await supabase
-      .from('alertas')
-      .insert({
+  if (!error) {
+    for (const d of dispositivos) {
+      console.log(`ALERTA: ${d.chip_id} sin ping desde ${d.ultimo_ping}`);
+      await supabase.from('dispositivos').update({ estado: 'offline' }).eq('chip_id', d.chip_id);
+      await supabase.from('alertas').insert({
         chip_id: d.chip_id,
         tipo: 'offline',
         mensaje: `Dispositivo ${d.nombre || d.chip_id} sin señal desde ${formatearFecha(d.ultimo_ping)}`
       });
-
-    await enviarEmailAlerta(d, 'offline');
-
-    console.log(`Dispositivo ${d.chip_id} marcado como OFFLINE`);
+      await enviarEmailAlerta(d, 'offline');
+      console.log(`Dispositivo ${d.chip_id} marcado como OFFLINE`);
+    }
   }
+
+  // Comprobar renovaciones (solo una vez al día — a las 9:00)
+  const hora = ahora.getHours();
+  if (hora === 9) {
+    const { data: todos } = await supabase
+      .from('dispositivos')
+      .select('*')
+      .eq('activo', true)
+      .not('fecha_expiracion', 'is', null);
+
+    if (todos) {
+      for (const d of todos) {
+        const exp = new Date(d.fecha_expiracion);
+        const diffMs = exp - ahora;
+        const diffDias = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffDias === 15 || diffDias === 7 || diffDias === 1) {
+          await enviarEmailRenovacion(d, diffDias);
+        }
+
+        if (diffDias <= 0) {
+          await supabase.from('dispositivos').update({ activo: false }).eq('chip_id', d.chip_id);
+          console.log(`Dispositivo ${d.chip_id} desactivado por caducidad`);
+        }
+      }
+    }
+  }
+
 }, 1 * 60 * 1000);
 
 app.get('/', (req, res) => {
