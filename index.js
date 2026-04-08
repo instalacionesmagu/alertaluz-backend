@@ -198,6 +198,34 @@ app.get('/alertas', async (req, res) => {
   res.json({ alertas: data || [] });
 });
 
+// Panel admin — solo con clave secreta
+app.get('/admin/dispositivos', async (req, res) => {
+  const { clave } = req.query;
+  if (clave !== process.env.ADMIN_KEY) return res.status(401).json({ ok: false, error: 'No autorizado' });
+
+  const { data, error } = await supabase
+    .from('dispositivos')
+    .select('*')
+    .order('estado', { ascending: true })
+    .order('ultimo_ping', { ascending: false });
+
+  if (error) return res.status(500).json({ ok: false });
+  res.json({ dispositivos: data || [] });
+});
+
+app.get('/admin/clientes', async (req, res) => {
+  const { clave } = req.query;
+  if (clave !== process.env.ADMIN_KEY) return res.status(401).json({ ok: false, error: 'No autorizado' });
+
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) return res.status(500).json({ ok: false });
+  res.json({ clientes: data || [] });
+});
+
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
   const ahora = new Date();
