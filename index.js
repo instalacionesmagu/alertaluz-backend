@@ -82,7 +82,7 @@ async function enviarEmailAlerta(dispositivo, tipo) {
        </table>`;
 
   await resend.emails.send({
-    from: 'AlertaLuz <onboarding@resend.dev>',
+    from: 'AlertaLuz <alertas@alertaluz.es>',
     to: dispositivo.email_cliente,
     subject: asunto,
     html: mensajeHTML
@@ -111,7 +111,7 @@ async function enviarEmailInstruccionesTelegram(dispositivo) {
   const nombre = dispositivo.nombre || dispositivo.chip_id;
 
   await resend.emails.send({
-    from: 'AlertaLuz <onboarding@resend.dev>',
+    from: 'AlertaLuz <alertas@alertaluz.es>',
     to: dispositivo.email_cliente,
     subject: `📱 Activa tus alertas de Telegram — AlertaLuz`,
     html: `
@@ -153,7 +153,7 @@ async function enviarEmailRenovacion(dispositivo, diasRestantes) {
   const fechaExp = formatearFechaSolo(dispositivo.fecha_expiracion);
 
   await resend.emails.send({
-    from: 'AlertaLuz <onboarding@resend.dev>',
+    from: 'AlertaLuz <alertas@alertaluz.es>',
     to: dispositivo.email_cliente,
     subject: `⏰ Tu servicio AlertaLuz caduca en ${diasRestantes} días`,
     html: `<h2 style="color:#e67e22">⏰ Renovación de servicio AlertaLuz</h2>
@@ -347,7 +347,7 @@ app.post('/admin/dispositivo/telegram', async (req, res) => {
     await supabase.from('dispositivos').update({ telegram_chat_id: null }).eq('chip_id', chip_id);
     if (disp.email_cliente) {
       await resend.emails.send({
-        from: 'AlertaLuz <onboarding@resend.dev>',
+        from: 'AlertaLuz <alertas@alertaluz.es>',
         to: disp.email_cliente,
         subject: `📵 Alertas Telegram desactivadas — AlertaLuz`,
         html: `<p>Las alertas por Telegram para tu dispositivo <b>${disp.nombre || chip_id}</b> han sido desactivadas.</p>
