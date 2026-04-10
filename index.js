@@ -433,28 +433,55 @@ app.get('/admin/solicitudes', async (req, res) => {
 // ADMIN — gestionar solicitud (aprobar/rechazar)
 app.post('/admin/solicitud/gestionar', async (req, res) => {
   if (!verificarAdmin(req, res)) return;
-  const { id, estado, chip_id, email_cliente, extras_activar } = req.body;
+  const { id, estado, chip_id, email_cliente, extras_solicitados } = req.body;
 
   await supabase.from('solicitudes_extras').update({ estado, gestionado_at: new Date().toISOString() }).eq('id', id);
 
-  if (estado === 'aprobada' && extras_activar) {
-    await supabase.from('dispositivos').update(extras_activar).eq('chip_id', chip_id);
+  if (estado === 'aprobada') {
+    // Mapear extras por nombre al campo de Supabase
+    const updates = {};
+    let extrasArray = [];
+    try { extrasArray = JSON.parse(extras_solicitados || '[]'); } catch(e) { extrasArray = []; }
+
+    for (const extra of extrasArray) {
+      const e = extra.toLowerCase();
+      if (e.includes('email')) updates.extra_email_multiple = true;
+      if (e.includes('telegram')) updates.extra_telegram_multiple = true;
+      if (e.includes('push')) updates.extra_push = true;
+      if (e.includes('sms')) updates.extra_sms = true;
+      if (e.includes('llamada')) updates.extra_llamada = true;
+      if (e.includes('renovaci')) { /* renovación base - no activa extras */ }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await supabase.from('dispositivos').update(updates).eq('chip_id', chip_id);
+      console.log(`Extras activados para ${chip_id}:`, updates);
+    }
 
     await resend.emails.send({
       from: 'AlertaLuz <alertas@alertaluz.es>',
       to: email_cliente,
       subject: `✅ Tus extras AlertaLuz están activos`,
       html: `
-        <h2 style="color:#27ae60">✅ ¡Extras activados!</h2>
-        <p>Hemos activado los extras que solicitaste en tu dispositivo AlertaLuz.</p>
-        <p>Ya puedes disfrutar de tus nuevos servicios.</p>
-        <br>
-        <a href="https://alertaluz.es" style="background:#1565C0;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">Ver mi panel</a>
-        <br><br>
-        <p style="color:#888;font-size:12px">¿Tienes dudas? <a href="mailto:instalacionesmagu@gmail.com">instalacionesmagu@gmail.com</a></p>
+        <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
+          <div style="background:linear-gradient(135deg,#1565C0,#1976D2);padding:24px;border-radius:12px 12px 0 0;text-align:center">
+            <h1 style="color:white;margin:0;font-size:22px">⚡ AlertaLuz</h1>
+            <p style="color:#FFD600;margin:4px 0 0;font-size:13px">MaGu Multiservicios</p>
+          </div>
+          <div style="background:white;padding:28px;border:1px solid #eee;border-top:none;border-radius:0 0 12px 12px">
+            <h2 style="color:#27ae60;margin-top:0">✅ ¡Extras activados!</h2>
+            <p>Hemos activado los extras que solicitaste. Ya puedes configurarlos desde tu panel en la sección <b>Mi configuración</b>.</p>
+            <br>
+            <div style="text-align:center">
+              <a href="https://alertaluz.es/panel.html" style="display:inline-block;background:#1565C0;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600">Ir a Mi configuración</a>
+            </div>
+            <br>
+            <p style="color:#888;font-size:12px;text-align:center">¿Tienes dudas? <a href="mailto:instalacionesmagu@gmail.com">instalacionesmagu@gmail.com</a></p>
+          </div>
+        </div>
       `
     });
-    console.log(`Extras aprobados para ${email_cliente}`);
+    console.log(`Solicitud aprobada y extras activados para ${email_cliente}`);
   } else if (estado === 'rechazada') {
     await resend.emails.send({
       from: 'AlertaLuz <alertas@alertaluz.es>',
