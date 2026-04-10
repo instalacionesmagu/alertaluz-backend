@@ -97,13 +97,62 @@ async function enviarAlertaCompleta(dispositivo, tipo) {
 
   await enviarEmailAlerta(dispositivo, tipo);
 
-  // Solo enviar Telegram si está activo Y tiene chat_id vinculado
   if (dispositivo.telegram_activo && dispositivo.telegram_chat_id) {
     const msg = tipo === 'offline'
       ? `⚠️ <b>Sin señal</b>\n\nDispositivo: <b>${nombre}</b>\nÚltimo ping: ${horaEvento}\nAlerta generada: ${horaAhora}`
       : `✅ <b>Servicio restablecido</b>\n\nDispositivo: <b>${nombre}</b>\nMotivo: ${dispositivo.motivo_corte || 'desconocido'}\nReconexión: ${horaAhora}`;
     await enviarTelegram(dispositivo.telegram_chat_id, msg);
   }
+}
+
+async function enviarEmailBienvenida(email, nombre, nombreDispositivo, password, expiracion) {
+  const fechaExp = formatearFechaSolo(expiracion);
+  await resend.emails.send({
+    from: 'AlertaLuz <alertas@alertaluz.es>',
+    to: email,
+    subject: `✅ ¡Bienvenido a AlertaLuz! Tu dispositivo está activo`,
+    html: `
+      <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto">
+        <div style="background:linear-gradient(135deg,#1565C0,#1976D2);padding:24px;border-radius:12px 12px 0 0;text-align:center">
+          <h1 style="color:white;margin:0;font-size:24px">⚡ AlertaLuz</h1>
+          <p style="color:#FFD600;margin:6px 0 0;font-size:13px">MaGu Multiservicios</p>
+        </div>
+        <div style="background:white;padding:28px;border:1px solid #eee;border-top:none;border-radius:0 0 12px 12px">
+          <h2 style="color:#1a1a2e;margin-top:0">✅ ¡Tu dispositivo está activo!</h2>
+          <p>Hola <b>${nombre}</b>, tu dispositivo AlertaLuz ha sido configurado correctamente y ya está monitorizando tu suministro eléctrico.</p>
+          <br>
+          <div style="background:#e3f2fd;border-radius:10px;padding:20px;margin:16px 0">
+            <p style="margin:0 0 8px;font-weight:600;color:#1565C0">📱 Datos de tu dispositivo</p>
+            <table style="border-collapse:collapse;width:100%">
+              <tr><td style="padding:4px 12px 4px 0;color:#666">Nombre:</td><td style="font-weight:600">${nombreDispositivo}</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666">Estado:</td><td style="color:#27ae60;font-weight:600">Online ✓</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666">Servicio activo hasta:</td><td style="font-weight:600">${fechaExp}</td></tr>
+            </table>
+          </div>
+          <div style="background:#f8f9fa;border-radius:10px;padding:20px;margin:16px 0">
+            <p style="margin:0 0 8px;font-weight:600;color:#1a1a2e">🔐 Acceso a tu panel</p>
+            <table style="border-collapse:collapse;width:100%">
+              <tr><td style="padding:4px 12px 4px 0;color:#666">Web:</td><td><a href="https://alertaluz.es" style="color:#1565C0;font-weight:600">alertaluz.es</a></td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666">Email:</td><td>${email}</td></tr>
+              <tr><td style="padding:4px 12px 4px 0;color:#666">Contraseña:</td><td style="font-weight:600">${password}</td></tr>
+            </table>
+          </div>
+          <div style="background:#e8faf0;border-radius:10px;padding:20px;margin:16px 0">
+            <p style="margin:0 0 8px;font-weight:600;color:#27ae60">📋 ¿Cómo funciona?</p>
+            <p style="margin:0;color:#555;font-size:13px;line-height:1.6">Tu dispositivo envía una señal cada minuto. Si detectamos que ha dejado de responder durante más de 2 minutos, recibirás un email de alerta inmediatamente. También te avisaremos cuando el servicio se restablezca y el motivo del corte.</p>
+          </div>
+          <div style="text-align:center;margin-top:24px">
+            <a href="https://alertaluz.es" style="display:inline-block;background:linear-gradient(135deg,#1565C0,#1976D2);color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px">
+              Acceder a mi panel
+            </a>
+          </div>
+          <br>
+          <p style="color:#888;font-size:12px;text-align:center">¿Tienes alguna duda? Contacta con nosotros en <a href="mailto:instalacionesmagu@gmail.com" style="color:#1565C0">instalacionesmagu@gmail.com</a></p>
+        </div>
+      </div>
+    `
+  });
+  console.log(`Email bienvenida enviado a ${email}`);
 }
 
 async function enviarEmailInstruccionesTelegram(dispositivo) {
@@ -123,7 +172,6 @@ async function enviarEmailInstruccionesTelegram(dispositivo) {
         <div style="background:white;padding:28px;border:1px solid #eee;border-top:none;border-radius:0 0 12px 12px">
           <h2 style="color:#1a1a2e;margin-top:0">📱 Alertas por Telegram activadas</h2>
           <p>Hola, se ha activado el servicio de alertas por Telegram para tu dispositivo <b>${nombre}</b>.</p>
-          <p>Sigue estos pasos para empezar a recibir las alertas:</p>
           <br>
           <div style="background:#f8f9fa;border-radius:10px;padding:20px;margin:16px 0">
             <p style="margin:0 0 12px"><b>Paso 1</b> — Abre Telegram y busca nuestro bot:</p>
@@ -132,14 +180,13 @@ async function enviarEmailInstruccionesTelegram(dispositivo) {
             </a>
           </div>
           <div style="background:#f8f9fa;border-radius:10px;padding:20px;margin:16px 0">
-            <p style="margin:0 0 8px"><b>Paso 2</b> — Pulsa <b>Iniciar</b> y luego escribe este mensaje:</p>
+            <p style="margin:0 0 8px"><b>Paso 2</b> — Pulsa Iniciar y luego escribe:</p>
             <code style="background:#e3f2fd;padding:8px 14px;border-radius:6px;display:inline-block;font-size:14px;color:#1565C0">/vincular ${dispositivo.email_cliente}</code>
           </div>
           <div style="background:#f8f9fa;border-radius:10px;padding:20px;margin:16px 0">
-            <p style="margin:0"><b>Paso 3</b> — Listo. El bot te confirmará la vinculación y empezarás a recibir alertas al instante.</p>
+            <p style="margin:0"><b>Paso 3</b> — Listo. El bot te confirmará la vinculación.</p>
           </div>
-          <br>
-          <p style="color:#888;font-size:12px">Si tienes algún problema contacta con nosotros en <a href="mailto:instalacionesmagu@gmail.com">instalacionesmagu@gmail.com</a></p>
+          <p style="color:#888;font-size:12px">¿Problemas? Contacta en <a href="mailto:instalacionesmagu@gmail.com">instalacionesmagu@gmail.com</a></p>
         </div>
       </div>
     `
@@ -187,7 +234,6 @@ app.post('/telegram/webhook', async (req, res) => {
 
   if (texto.startsWith('/vincular ')) {
     const email = texto.replace('/vincular ', '').trim().toLowerCase();
-
     const { data: cliente } = await supabase.from('clientes').select('*').eq('email', email).single();
 
     if (!cliente) {
@@ -203,9 +249,7 @@ app.post('/telegram/webhook', async (req, res) => {
     }
 
     await supabase.from('dispositivos').update({ telegram_chat_id: String(chatId) }).eq('email_cliente', email);
-
     await enviarTelegram(chatId, `✅ <b>¡Cuenta vinculada!</b>\n\nHola <b>${cliente.nombre}</b>, a partir de ahora recibirás las alertas de tus dispositivos por aquí.\n\n⚡ AlertaLuz by MaGu Multiservicios`);
-
     console.log(`Telegram vinculado: ${email} → ${chatId}`);
   } else if (texto === '/start') {
     await enviarTelegram(chatId, `👋 <b>Bienvenido a AlertaLuz</b>\n\nPara vincular tu cuenta escribe:\n\n<code>/vincular tuemail@ejemplo.com</code>\n\n⚡ MaGu Multiservicios`);
@@ -251,23 +295,33 @@ app.get('/registrar', async (req, res) => {
 
   const hoy = new Date();
   const expiracion = new Date(hoy.setFullYear(hoy.getFullYear() + 1)).toISOString().split('T')[0];
+  const nombreLimpio = decodeURIComponent(nombre || 'Mi dispositivo');
+  const emailLimpio = decodeURIComponent(email).toLowerCase();
 
   const { error } = await supabase.from('dispositivos').upsert({
-    chip_id: id, email_cliente: email, nombre: nombre || 'Mi dispositivo',
+    chip_id: id, email_cliente: emailLimpio, nombre: nombreLimpio,
     estado: 'online', activo: true, fecha_expiracion: expiracion,
     ultimo_ping: new Date().toISOString()
   }, { onConflict: 'chip_id' });
 
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
-  const { data: clienteExiste } = await supabase.from('clientes').select('email').eq('email', email).single();
+  const { data: clienteExiste } = await supabase.from('clientes').select('email').eq('email', emailLimpio).single();
+  const passLimpia = password || id.slice(-4);
 
   if (!clienteExiste) {
     await supabase.from('clientes').insert({
-      email, password: password || id.slice(-4), nombre: nombre || 'Cliente', fecha_expiracion: expiracion
+      email: emailLimpio, password: passLimpia, nombre: nombreLimpio, fecha_expiracion: expiracion
     });
   } else if (password) {
-    await supabase.from('clientes').update({ password }).eq('email', email);
+    await supabase.from('clientes').update({ password: passLimpia }).eq('email', emailLimpio);
+  }
+
+  // Enviar email de bienvenida
+  try {
+    await enviarEmailBienvenida(emailLimpio, nombreLimpio, nombreLimpio, passLimpia, expiracion);
+  } catch(e) {
+    console.error('Error email bienvenida:', e.message);
   }
 
   res.json({ ok: true, expiracion });
@@ -338,12 +392,10 @@ app.post('/admin/dispositivo/telegram', async (req, res) => {
   const { error } = await supabase.from('dispositivos').update({ telegram_activo }).eq('chip_id', chip_id);
   if (error) return res.status(500).json({ ok: false });
 
-  // Si se activa, enviar email con instrucciones
   if (telegram_activo) {
     await enviarEmailInstruccionesTelegram(disp);
-    console.log(`Telegram activado para ${disp.email_cliente} — email instrucciones enviado`);
+    console.log(`Telegram activado para ${disp.email_cliente}`);
   } else {
-    // Si se desactiva, limpiar el chat_id y avisar
     await supabase.from('dispositivos').update({ telegram_chat_id: null }).eq('chip_id', chip_id);
     if (disp.email_cliente) {
       await resend.emails.send({
