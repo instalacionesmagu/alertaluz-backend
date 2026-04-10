@@ -556,6 +556,40 @@ app.delete('/admin/cliente/:email', async (req, res) => {
   res.json({ ok: true });
 });
 
+
+// ADMIN — configurar extras de dispositivo
+app.post('/admin/dispositivo/configurar', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_id, updates } = req.body;
+  const { error } = await supabase.from('dispositivos').update(updates).eq('chip_id', chip_id);
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+  console.log(`Configuración actualizada para ${chip_id}`);
+  res.json({ ok: true });
+});
+
+// CLIENTE — actualizar su propia configuración
+app.post('/configurar-dispositivo', async (req, res) => {
+  const { email, chip_id, extra_emails, extra_telegram_ids, extra_sms_telefono, extra_llamada_telefono, extra_sms_tiempo, extra_llamada_tiempo } = req.body;
+  if (!email || !chip_id) return res.status(400).json({ ok: false });
+
+  // Verificar que el dispositivo pertenece al cliente
+  const { data: disp } = await supabase.from('dispositivos').select('email_cliente').eq('chip_id', chip_id).single();
+  if (!disp || disp.email_cliente !== email) return res.status(403).json({ ok: false, error: 'No autorizado' });
+
+  const updates = {};
+  if (extra_emails !== undefined) updates.extra_emails = extra_emails;
+  if (extra_telegram_ids !== undefined) updates.extra_telegram_ids = extra_telegram_ids;
+  if (extra_sms_telefono !== undefined) updates.extra_sms_telefono = extra_sms_telefono;
+  if (extra_llamada_telefono !== undefined) updates.extra_llamada_telefono = extra_llamada_telefono;
+  if (extra_sms_tiempo !== undefined) updates.extra_sms_tiempo = extra_sms_tiempo;
+  if (extra_llamada_tiempo !== undefined) updates.extra_llamada_tiempo = extra_llamada_tiempo;
+
+  const { error } = await supabase.from('dispositivos').update(updates).eq('chip_id', chip_id);
+  if (error) return res.status(500).json({ ok: false });
+  console.log(`Cliente ${email} actualizó configuración de ${chip_id}`);
+  res.json({ ok: true });
+});
+
 // Vigilante
 setInterval(async () => {
   console.log('Vigilante: comprobando dispositivos...');
