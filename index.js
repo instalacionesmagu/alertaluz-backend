@@ -438,6 +438,17 @@ app.post('/admin/solicitud/gestionar', async (req, res) => {
   await supabase.from('solicitudes_extras').update({ estado, gestionado_at: new Date().toISOString() }).eq('id', id);
 
   if (estado === 'aprobada') {
+    // Calcular fecha de expiración según periodicidad
+    const { data: solicitud } = await supabase.from('solicitudes_extras').select('periodicidad').eq('id', id).single();
+    const periodicidad = solicitud?.periodicidad || 'anual';
+    const fechaExpiracion = new Date();
+    if (periodicidad === 'mensual') {
+      fechaExpiracion.setMonth(fechaExpiracion.getMonth() + 1);
+    } else {
+      fechaExpiracion.setFullYear(fechaExpiracion.getFullYear() + 1);
+    }
+    const fechaExpStr = fechaExpiracion.toISOString().split('T')[0];
+
     // Mapear extras por nombre al campo de Supabase
     const updates = {};
     let extrasArray = [];
@@ -445,17 +456,31 @@ app.post('/admin/solicitud/gestionar', async (req, res) => {
 
     for (const extra of extrasArray) {
       const e = extra.toLowerCase();
-      if (e.includes('email')) updates.extra_email_multiple = true;
-      if (e.includes('telegram')) updates.extra_telegram_multiple = true;
-      if (e.includes('push')) updates.extra_push = true;
-      if (e.includes('sms')) updates.extra_sms = true;
-      if (e.includes('llamada')) updates.extra_llamada = true;
-      if (e.includes('renovaci')) { /* renovación base - no activa extras */ }
+      if (e.includes('email')) {
+        updates.extra_email_multiple = true;
+        updates.extra_email_expira = fechaExpStr;
+      }
+      if (e.includes('telegram')) {
+        updates.extra_telegram_multiple = true;
+        updates.extra_telegram_expira = fechaExpStr;
+      }
+      if (e.includes('push')) {
+        updates.extra_push = true;
+        updates.extra_push_expira = fechaExpStr;
+      }
+      if (e.includes('sms')) {
+        updates.extra_sms = true;
+        updates.extra_sms_expira = fechaExpStr;
+      }
+      if (e.includes('llamada')) {
+        updates.extra_llamada = true;
+        updates.extra_llamada_expira = fechaExpStr;
+      }
     }
 
     if (Object.keys(updates).length > 0) {
       await supabase.from('dispositivos').update(updates).eq('chip_id', chip_id);
-      console.log(`Extras activados para ${chip_id}:`, updates);
+      console.log(`Extras activados para ${chip_id} hasta ${fechaExpStr}:`, updates);
     }
 
     await resend.emails.send({
@@ -652,6 +677,7 @@ setInterval(async () => {
   if (hora === 9) {
     const { data: todosExp } = await supabase.from('dispositivos').select('*').eq('activo', true).not('fecha_expiracion', 'is', null);
     if (todosExp) {
+      const hoyStr = ahora.toISOString().split('T')[0];
       for (const d of todosExp) {
         const exp = new Date(d.fecha_expiracion);
         const diffDias = Math.ceil((exp - ahora) / (1000 * 60 * 60 * 24));
@@ -659,6 +685,32 @@ setInterval(async () => {
         if (diffDias <= 0) {
           await supabase.from('dispositivos').update({ activo: false }).eq('chip_id', d.chip_id);
           console.log(`Dispositivo ${d.chip_id} desactivado por caducidad`);
+        }
+
+        // Verificar expiración de extras individuales
+        const extrasUpdates = {};
+        if (d.extra_email_expira && d.extra_email_expira <= hoyStr) {
+          extrasUpdates.extra_email_multiple = false;
+          console.log(`Email múltiple caducado para ${d.chip_id}`);
+        }
+        if (d.extra_telegram_expira && d.extra_telegram_expira <= hoyStr) {
+          extrasUpdates.extra_telegram_multiple = false;
+          console.log(`Telegram múltiple caducado para ${d.chip_id}`);
+        }
+        if (d.extra_push_expira && d.extra_push_expira <= hoyStr) {
+          extrasUpdates.extra_push = false;
+          console.log(`Push caducado para ${d.chip_id}`);
+        }
+        if (d.extra_sms_expira && d.extra_sms_expira <= hoyStr) {
+          extrasUpdates.extra_sms = false;
+          console.log(`SMS caducado para ${d.chip_id}`);
+        }
+        if (d.extra_llamada_expira && d.extra_llamada_expira <= hoyStr) {
+          extrasUpdates.extra_llamada = false;
+          console.log(`Llamada caducada para ${d.chip_id}`);
+        }
+        if (Object.keys(extrasUpdates).length > 0) {
+          await supabase.from('dispositivos').update(extrasUpdates).eq('chip_id', d.chip_id);
         }
       }
     }
