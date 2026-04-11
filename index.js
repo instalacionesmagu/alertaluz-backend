@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -60,16 +59,19 @@ async function enviarTelegram(chatId, mensaje) {
   });
 }
 
-async function enviarPush(externalId, titulo, mensaje) {
+async function enviarPush(subscriptionIds, titulo, mensaje) {
   if (!process.env.ONESIGNAL_APP_ID || !process.env.ONESIGNAL_API_KEY) return;
+  if (!subscriptionIds || subscriptionIds.trim() === '') return;
+
+  const ids = subscriptionIds.split(',').map(s => s.trim()).filter(Boolean);
+  if (ids.length === 0) return;
+
   try {
     const body = JSON.stringify({
       app_id: process.env.ONESIGNAL_APP_ID,
-      include_aliases: { external_id: [externalId] },
-      target_channel: 'push',
+      include_subscription_uuids: ids,
       headings: { en: titulo },
-      contents: { en: mensaje },
-      name: 'AlertaLuz notification'
+      contents: { en: mensaje }
     });
     const options = {
       hostname: 'api.onesignal.com',
@@ -85,7 +87,7 @@ async function enviarPush(externalId, titulo, mensaje) {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
-          console.log(`Push enviado a ${externalId}: ${data}`);
+          console.log(`Push enviado a ${ids.length} dispositivos: ${data}`);
           resolve();
         });
       });
@@ -175,12 +177,12 @@ async function enviarAlertaCompleta(dispositivo, tipo) {
   }
 
   // Push notifications
-  if (dispositivo.extra_push && dispositivo.email_cliente) {
+  if (dispositivo.extra_push && dispositivo.extra_push_subscription_ids) {
     const pushTitulo = tipo === 'offline' ? `⚠️ ${nombre} sin señal` : `✅ ${nombre} restablecido`;
     const pushMsg = tipo === 'offline'
       ? `Último ping: ${horaEvento}`
       : `Motivo: ${dispositivo.motivo_corte || 'desconocido'} · Reconexión: ${horaAhora}`;
-    await enviarPush(dispositivo.email_cliente, pushTitulo, pushMsg);
+    await enviarPush(dispositivo.extra_push_subscription_ids, pushTitulo, pushMsg);
   }
 }
 
@@ -667,11 +669,25 @@ app.post('/admin/dispositivo/configurar', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Registrar player OneSignal — solo confirmar al frontend
+// Registrar subscription ID de OneSignal en Supabase
 app.post('/onesignal/registrar', async (req, res) => {
-  const { email, player_id } = req.body;
-  if (!email) return res.status(400).json({ ok: false });
-  console.log(`OneSignal registrado: ${email} subscription: ${player_id}`);
+  const { email, chip_id, subscription_id } = req.body;
+  if (!email || !chip_id || !subscription_id) return res.status(400).json({ ok: false });
+
+  // Verificar que el dispositivo pertenece al cliente
+  const { data: disp } = await supabase.from('dispositivos').select('email_cliente, extra_push_subscription_ids').eq('chip_id', chip_id).single();
+  if (!disp || disp.email_cliente !== email) return res.status(403).json({ ok: false });
+
+  // Añadir subscription_id si no existe ya
+  const ids = (disp.extra_push_subscription_ids || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!ids.includes(subscription_id)) {
+    ids.push(subscription_id);
+  }
+  // Mantener máximo 10 IDs
+  const nuevosIds = ids.slice(-10).join(',');
+
+  await supabase.from('dispositivos').update({ extra_push_subscription_ids: nuevosIds }).eq('chip_id', chip_id);
+  console.log(`OneSignal subscription guardado: ${email} → ${subscription_id}`);
   res.json({ ok: true });
 });
 
