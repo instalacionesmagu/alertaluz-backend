@@ -59,6 +59,43 @@ async function enviarTelegram(chatId, mensaje) {
   });
 }
 
+async function enviarPush(externalId, titulo, mensaje) {
+  if (!process.env.ONESIGNAL_APP_ID || !process.env.ONESIGNAL_API_KEY) return;
+  try {
+    const body = JSON.stringify({
+      app_id: process.env.ONESIGNAL_APP_ID,
+      filters: [{ field: 'external_user_id', value: externalId }],
+      headings: { es: titulo, en: titulo },
+      contents: { es: mensaje, en: mensaje },
+      target_channel: 'push'
+    });
+    const options = {
+      hostname: 'api.onesignal.com',
+      path: '/notifications',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`
+      }
+    };
+    return new Promise((resolve) => {
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          console.log(`Push enviado a ${externalId}: ${data}`);
+          resolve();
+        });
+      });
+      req.on('error', e => console.error('Error push:', e.message));
+      req.write(body);
+      req.end();
+    });
+  } catch(e) {
+    console.error('Error push:', e.message);
+  }
+}
+
 async function enviarEmailAlerta(dispositivo, tipo) {
   if (!dispositivo.email_cliente) return;
   const esOffline = tipo === 'offline';
@@ -133,6 +170,15 @@ async function enviarAlertaCompleta(dispositivo, tipo) {
         await enviarTelegram(chatId, msg);
       }
     }
+  }
+
+  // Push notifications
+  if (dispositivo.extra_push && dispositivo.email_cliente) {
+    const pushTitulo = tipo === 'offline' ? `⚠️ ${nombre} sin señal` : `✅ ${nombre} restablecido`;
+    const pushMsg = tipo === 'offline'
+      ? `Último ping: ${horaEvento}`
+      : `Motivo: ${dispositivo.motivo_corte || 'desconocido'} · Reconexión: ${horaAhora}`;
+    await enviarPush(dispositivo.email_cliente, pushTitulo, pushMsg);
   }
 }
 
@@ -617,6 +663,43 @@ app.post('/admin/dispositivo/configurar', async (req, res) => {
   if (error) return res.status(500).json({ ok: false, error: error.message });
   console.log(`Configuración actualizada para ${chip_id}`);
   res.json({ ok: true });
+});
+
+// Registrar player OneSignal
+app.post('/onesignal/registrar', async (req, res) => {
+  const { email, player_id } = req.body;
+  if (!email || !player_id) return res.status(400).json({ ok: false });
+
+  // Asociar player_id como external_user_id en OneSignal
+  if (!process.env.ONESIGNAL_APP_ID || !process.env.ONESIGNAL_API_KEY) {
+    return res.json({ ok: false, error: 'OneSignal no configurado' });
+  }
+
+  try {
+    const body = JSON.stringify({ external_user_id: email });
+    const options = {
+      hostname: 'api.onesignal.com',
+      path: `/players/${player_id}`,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`
+      }
+    };
+    await new Promise((resolve) => {
+      const req2 = https.request(options, (r) => {
+        r.on('data', () => {});
+        r.on('end', resolve);
+      });
+      req2.on('error', e => console.error('Error OS register:', e.message));
+      req2.write(body);
+      req2.end();
+    });
+    console.log(`OneSignal registrado: ${email} → ${player_id}`);
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // CLIENTE — actualizar su propia configuración
