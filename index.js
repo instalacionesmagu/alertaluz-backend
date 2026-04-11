@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -66,8 +67,9 @@ async function enviarPush(externalId, titulo, mensaje) {
       app_id: process.env.ONESIGNAL_APP_ID,
       include_aliases: { external_id: [externalId] },
       target_channel: 'push',
-      headings: { es: titulo, en: titulo },
-      contents: { es: mensaje, en: mensaje }
+      headings: { en: titulo },
+      contents: { en: mensaje },
+      name: 'AlertaLuz notification'
     });
     const options = {
       hostname: 'api.onesignal.com',
@@ -665,47 +667,12 @@ app.post('/admin/dispositivo/configurar', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Registrar player OneSignal
+// Registrar player OneSignal — solo confirmar al frontend
 app.post('/onesignal/registrar', async (req, res) => {
   const { email, player_id } = req.body;
-  if (!email || !player_id) return res.status(400).json({ ok: false });
-
-  // Asociar player_id como external_user_id en OneSignal
-  if (!process.env.ONESIGNAL_APP_ID || !process.env.ONESIGNAL_API_KEY) {
-    return res.json({ ok: false, error: 'OneSignal no configurado' });
-  }
-
-  try {
-    // API v2: asignar external_id al subscription
-    const body = JSON.stringify({
-      identity: { external_id: email }
-    });
-    const options = {
-      hostname: 'api.onesignal.com',
-      path: `/apps/${process.env.ONESIGNAL_APP_ID}/users/by/onesignal_id/${player_id}/identity`,
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`
-      }
-    };
-    await new Promise((resolve) => {
-      const req2 = https.request(options, (r) => {
-        let data = '';
-        r.on('data', chunk => data += chunk);
-        r.on('end', () => {
-          console.log(`OneSignal identity asignada: ${email} → ${player_id}: ${data}`);
-          resolve();
-        });
-      });
-      req2.on('error', e => console.error('Error OS register:', e.message));
-      req2.write(body);
-      req2.end();
-    });
-    res.json({ ok: true });
-  } catch(e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
+  if (!email) return res.status(400).json({ ok: false });
+  console.log(`OneSignal registrado: ${email} subscription: ${player_id}`);
+  res.json({ ok: true });
 });
 
 // CLIENTE — actualizar su propia configuración
