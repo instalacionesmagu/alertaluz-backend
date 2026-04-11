@@ -64,10 +64,10 @@ async function enviarPush(externalId, titulo, mensaje) {
   try {
     const body = JSON.stringify({
       app_id: process.env.ONESIGNAL_APP_ID,
-      filters: [{ field: 'external_user_id', value: externalId }],
+      include_aliases: { external_id: [externalId] },
+      target_channel: 'push',
       headings: { es: titulo, en: titulo },
-      contents: { es: mensaje, en: mensaje },
-      target_channel: 'push'
+      contents: { es: mensaje, en: mensaje }
     });
     const options = {
       hostname: 'api.onesignal.com',
@@ -676,11 +676,14 @@ app.post('/onesignal/registrar', async (req, res) => {
   }
 
   try {
-    const body = JSON.stringify({ external_user_id: email });
+    // API v2: asignar external_id al subscription
+    const body = JSON.stringify({
+      identity: { external_id: email }
+    });
     const options = {
       hostname: 'api.onesignal.com',
-      path: `/players/${player_id}`,
-      method: 'PUT',
+      path: `/apps/${process.env.ONESIGNAL_APP_ID}/users/by/onesignal_id/${player_id}/identity`,
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`
@@ -688,14 +691,17 @@ app.post('/onesignal/registrar', async (req, res) => {
     };
     await new Promise((resolve) => {
       const req2 = https.request(options, (r) => {
-        r.on('data', () => {});
-        r.on('end', resolve);
+        let data = '';
+        r.on('data', chunk => data += chunk);
+        r.on('end', () => {
+          console.log(`OneSignal identity asignada: ${email} → ${player_id}: ${data}`);
+          resolve();
+        });
       });
       req2.on('error', e => console.error('Error OS register:', e.message));
       req2.write(body);
       req2.end();
     });
-    console.log(`OneSignal registrado: ${email} → ${player_id}`);
     res.json({ ok: true });
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
