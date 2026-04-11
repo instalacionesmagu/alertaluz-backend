@@ -69,8 +69,7 @@ async function enviarPush(subscriptionIds, titulo, mensaje) {
   try {
     const body = JSON.stringify({
       app_id: process.env.ONESIGNAL_APP_ID,
-      include_subscription_uuids: ids,
-      target_channel: 'push',
+      include_player_ids: ids,
       headings: { en: titulo, es: titulo },
       contents: { en: mensaje, es: mensaje }
     });
