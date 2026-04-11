@@ -70,8 +70,9 @@ async function enviarPush(subscriptionIds, titulo, mensaje) {
     const body = JSON.stringify({
       app_id: process.env.ONESIGNAL_APP_ID,
       include_subscription_uuids: ids,
-      headings: { en: titulo },
-      contents: { en: mensaje }
+      target_channel: 'push',
+      headings: { en: titulo, es: titulo },
+      contents: { en: mensaje, es: mensaje }
     });
     const options = {
       hostname: 'api.onesignal.com',
@@ -79,7 +80,7 @@ async function enviarPush(subscriptionIds, titulo, mensaje) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`
+        'Authorization': `Basic ${process.env.ONESIGNAL_API_KEY}`
       }
     };
     return new Promise((resolve) => {
