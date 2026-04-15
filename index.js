@@ -1,5 +1,4 @@
 const express = require('express');
-const multer = require('multer');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
@@ -731,9 +730,9 @@ app.post('/configurar-dispositivo', async (req, res) => {
 
 
 // OTA — subir firmware (multipart form)
-const multer = require('multer');
-const storage_multer = multer.memoryStorage();
-const upload = multer({ storage: storage_multer, limits: { fileSize: 2 * 1024 * 1024 } });
+const multerLib = require('multer');
+const storage_multer = multerLib.memoryStorage();
+const upload = multerLib({ storage: storage_multer, limits: { fileSize: 2 * 1024 * 1024 } });
 
 app.post('/admin/ota/subir', upload.single('firmware'), async (req, res) => {
   if (!verificarAdmin(req, res)) return;
