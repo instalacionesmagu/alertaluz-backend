@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
@@ -343,7 +344,21 @@ app.get('/ping', async (req, res) => {
   }, { onConflict: 'chip_id' });
 
   if (error) return res.status(500).json({ ok: false, error: error.message });
-  res.json({ ok: true, id, timestamp: ahora });
+
+  // Comprobar si hay OTA pendiente para este dispositivo
+  const { data: dispActualizado } = await supabase.from('dispositivos').select('ota_pendiente, ota_version').eq('chip_id', id).single();
+
+  if (dispActualizado?.ota_pendiente && dispActualizado?.ota_version) {
+    const { data: fw } = await supabase.from('ota_firmware').select('url').eq('version', dispActualizado.ota_version).eq('activo', true).single();
+    if (fw?.url) {
+      // Limpiar flag OTA para que no se repita
+      await supabase.from('dispositivos').update({ ota_pendiente: false }).eq('chip_id', id);
+      console.log(`OTA enviada a ${id}: v${dispActualizado.ota_version}`);
+      return res.json({ ok: true, id, timestamp: ahora, ota_pendiente: true, ota_url: fw.url });
+    }
+  }
+
+  res.json({ ok: true, id, timestamp: ahora, ota_pendiente: false });
 });
 
 // Registrar dispositivo
@@ -711,6 +726,84 @@ app.post('/configurar-dispositivo', async (req, res) => {
   const { error } = await supabase.from('dispositivos').update(updates).eq('chip_id', chip_id);
   if (error) return res.status(500).json({ ok: false });
   console.log(`Cliente ${email} actualizó configuración de ${chip_id}`);
+  res.json({ ok: true });
+});
+
+
+// OTA — subir firmware (multipart form)
+const multer = require('multer');
+const storage_multer = multer.memoryStorage();
+const upload = multer({ storage: storage_multer, limits: { fileSize: 2 * 1024 * 1024 } });
+
+app.post('/admin/ota/subir', upload.single('firmware'), async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Sin archivo' });
+
+  const { version, descripcion } = req.body;
+  if (!version) return res.status(400).json({ ok: false, error: 'Falta versión' });
+
+  const filename = `firmware_v${version}_${Date.now()}.bin`;
+
+  // Subir a Supabase Storage
+  const { data, error } = await supabase.storage
+    .from('firmware')
+    .upload(filename, req.file.buffer, {
+      contentType: 'application/octet-stream',
+      upsert: false
+    });
+
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+
+  // Obtener URL pública
+  const { data: urlData } = supabase.storage.from('firmware').getPublicUrl(filename);
+  const url = urlData.publicUrl;
+
+  // Guardar en tabla ota_firmware
+  await supabase.from('ota_firmware').update({ activo: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+  await supabase.from('ota_firmware').insert({ version, descripcion, filename, url, activo: true });
+
+  console.log(`Firmware v${version} subido: ${url}`);
+  res.json({ ok: true, url, version });
+});
+
+// OTA — ver firmwares disponibles
+app.get('/admin/ota/firmwares', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { data, error } = await supabase.from('ota_firmware').select('*').order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ ok: false });
+  res.json({ firmwares: data || [] });
+});
+
+// OTA — marcar chips para actualizar
+app.post('/admin/ota/marcar', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_ids, version, todos } = req.body;
+
+  const { data: fw } = await supabase.from('ota_firmware').select('*').eq('version', version).single();
+  if (!fw) return res.status(404).json({ ok: false, error: 'Versión no encontrada' });
+
+  let query = supabase.from('dispositivos').update({ ota_pendiente: true, ota_version: version });
+  if (!todos && chip_ids && chip_ids.length > 0) {
+    query = query.in('chip_id', chip_ids);
+  }
+  const { error } = await query;
+  if (error) return res.status(500).json({ ok: false });
+
+  const count = todos ? 'todos' : chip_ids.length;
+  console.log(`OTA marcada para ${count} dispositivos — versión ${version}`);
+  res.json({ ok: true });
+});
+
+// OTA — cancelar actualización pendiente
+app.post('/admin/ota/cancelar', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_ids, todos } = req.body;
+
+  let query = supabase.from('dispositivos').update({ ota_pendiente: false, ota_version: null });
+  if (!todos && chip_ids && chip_ids.length > 0) {
+    query = query.in('chip_id', chip_ids);
+  }
+  await query;
   res.json({ ok: true });
 });
 
