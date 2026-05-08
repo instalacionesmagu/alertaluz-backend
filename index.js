@@ -334,7 +334,24 @@ app.get('/ping', async (req, res) => {
       if (actual.fecha_expiracion < hoy) return res.json({ ok: false, mensaje: 'Servicio caducado.' });
     }
     if (actual.estado === 'offline') {
-      await enviarAlertaCompleta({ ...actual, motivo_corte: motivo || 'luz' }, 'online');
+      const motivoCorte = motivo || 'luz';
+      // Actualizar la última alerta offline con el motivo real
+      const { data: ultimaAlerta } = await supabase
+        .from('alertas')
+        .select('id')
+        .eq('chip_id', id)
+        .eq('tipo', 'offline')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (ultimaAlerta) {
+        const tipoNuevo = motivoCorte === 'internet' ? 'corte_internet' : 'corte_luz';
+        const msgNuevo = motivoCorte === 'internet'
+          ? `Corte de internet en ${actual.nombre || id}`
+          : `Corte de luz en ${actual.nombre || id}`;
+        await supabase.from('alertas').update({ tipo: tipoNuevo, mensaje: msgNuevo }).eq('id', ultimaAlerta.id);
+      }
+      await enviarAlertaCompleta({ ...actual, motivo_corte: motivoCorte }, 'online');
     }
   }
 
@@ -345,7 +362,7 @@ app.get('/ping', async (req, res) => {
   if (error) return res.status(500).json({ ok: false, error: error.message });
 
   // Comprobar si hay OTA pendiente para este dispositivo
-  const { data: dispActualizado } = await supabase.from('dispositivos').select('ota_pendiente, ota_version').eq('chip_id', id).single();
+  const { data: dispActualizado } = await supabase.from('dispositivos').select('ota_pendiente, ota_version, comando').eq('chip_id', id).single();
 
   if (dispActualizado?.ota_pendiente && dispActualizado?.ota_version) {
     const { data: fw } = await supabase.from('ota_firmware').select('url').eq('version', dispActualizado.ota_version).eq('activo', true).single();
@@ -357,9 +374,16 @@ app.get('/ping', async (req, res) => {
     }
   }
 
+  // Comprobar comando pendiente
+  if (dispActualizado?.comando) {
+    const comandoActual = dispActualizado.comando;
+    await supabase.from('dispositivos').update({ comando: null }).eq('chip_id', id);
+    console.log(`Comando enviado a ${id}: ${comandoActual}`);
+    return res.json({ ok: true, id, timestamp: ahora, ota_pendiente: false, comando: comandoActual });
+  }
+
   res.json({ ok: true, id, timestamp: ahora, ota_pendiente: false });
 });
-
 // Registrar dispositivo
 app.get('/registrar', async (req, res) => {
   const { id, email, nombre, password } = req.query;
@@ -644,6 +668,28 @@ app.post('/admin/dispositivo/email-copia', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ADMIN — enviar comando al dispositivo
+app.post('/admin/dispositivo/comando', async (req, res) => {
+  if (!verificarAdmin(req, res)) return;
+  const { chip_id, comando } = req.body;
+  const { error } = await supabase.from('dispositivos').update({ comando }).eq('chip_id', chip_id);
+  if (error) return res.status(500).json({ ok: false });
+  console.log(`Comando ${comando} enviado a ${chip_id}`);
+  res.json({ ok: true });
+});
+
+// CLIENTE — actualizar datos de configuración
+app.post('/actualizar-config', async (req, res) => {
+  const { email, chip_id, nuevo_nombre, nuevo_password } = req.body;
+  if (!email || !chip_id) return res.status(400).json({ ok: false });
+  const { data: disp } = await supabase.from('dispositivos').select('email_cliente').eq('chip_id', chip_id).single();
+  if (!disp || disp.email_cliente !== email) return res.status(403).json({ ok: false });
+  if (nuevo_nombre) await supabase.from('dispositivos').update({ nombre: nuevo_nombre }).eq('chip_id', chip_id);
+  if (nuevo_password) await supabase.from('clientes').update({ password: nuevo_password }).eq('email', email);
+  console.log(`Config actualizada para ${chip_id}`);
+  res.json({ ok: true });
+});
+
 // ADMIN — renovar fecha expiración
 app.post('/admin/dispositivo/renovar', async (req, res) => {
   if (!verificarAdmin(req, res)) return;
@@ -803,6 +849,17 @@ app.post('/admin/ota/cancelar', async (req, res) => {
     query = query.in('chip_id', chip_ids);
   }
   await query;
+  res.json({ ok: true });
+});
+
+// CLIENTE — solicitar reset WiFi
+app.post('/solicitar-reset-wifi', async (req, res) => {
+  const { email, chip_id } = req.body;
+  if (!email || !chip_id) return res.status(400).json({ ok: false });
+  const { data: disp } = await supabase.from('dispositivos').select('email_cliente').eq('chip_id', chip_id).single();
+  if (!disp || disp.email_cliente !== email) return res.status(403).json({ ok: false });
+  await supabase.from('dispositivos').update({ comando: 'reset_wifi' }).eq('chip_id', chip_id);
+  console.log(`Reset WiFi solicitado por cliente para ${chip_id}`);
   res.json({ ok: true });
 });
 
